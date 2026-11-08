@@ -1,0 +1,15 @@
+@"
+node_modules/
+dist/
+dist-electron/
+release/
+out/
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+"@ | Set-Content .gitignore

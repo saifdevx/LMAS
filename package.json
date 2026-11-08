@@ -1,0 +1,52 @@
+{
+  "name": "lmas",
+  "productName": "LMAS - Laboratory Management & Accounting System",
+  "version": "1.0.0",
+  "description": "Offline-first Laboratory Management & Accounting System for a medical diagnostic laboratory (Dera Ismail Khan, Khyber Pakhtunkhwa, Pakistan).",
+  "main": "./out/main/index.js",
+  "author": "LMAS Project",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "electron . --smoke",
+    "rebuild:deps": "electron-builder install-app-deps",
+    "dist:win": "electron-vite build && electron-builder --win nsis --x64 --config electron-builder.config.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.462.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.5.4",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.21.5": true,
+    "better-sqlite3@12.11.1": true
+  }
+}
