@@ -1,5 +1,6 @@
 import migration001 from './migrations/001_initial_schema.sql?raw'
 import migration002 from './migrations/002_lab_workflow.sql?raw'
+import migration003 from './migrations/003_payment_tender_and_advances.sql?raw'
 
 export interface Migration {
   version: number
@@ -13,5 +14,6 @@ export interface Migration {
  */
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial_schema', sql: migration001 },
-  { version: 2, name: '002_lab_workflow', sql: migration002 }
+  { version: 2, name: '002_lab_workflow', sql: migration002 },
+  { version: 3, name: '003_payment_tender_and_advances', sql: migration003 }
 ]

@@ -8,11 +8,12 @@ import type Database from 'better-sqlite3'
  * recorded as reversals/adjustments (CP4 acceptance).
  */
 
-export const TXN_TYPES = ['PATIENT_PAYMENT', 'COMMISSION_PAYMENT', 'EXPENSE', 'REFUND', 'ADJUSTMENT'] as const
+export const TXN_TYPES = ['PATIENT_PAYMENT', 'PATIENT_ADVANCE', 'COMMISSION_PAYMENT', 'EXPENSE', 'REFUND', 'ADJUSTMENT'] as const
 export type TxnType = (typeof TXN_TYPES)[number]
 
 export const TXN_TYPE_LABELS: Record<TxnType, string> = {
   PATIENT_PAYMENT: 'Patient payment',
+  PATIENT_ADVANCE: 'Patient advance',
   COMMISSION_PAYMENT: 'Commission payment',
   EXPENSE: 'Laboratory expense',
   REFUND: 'Refund',
@@ -51,7 +52,7 @@ export interface TransactionListResult {
   outflow_paisa: number
 }
 
-const INFLOW_TYPES: TxnType[] = ['PATIENT_PAYMENT']
+const INFLOW_TYPES: TxnType[] = ['PATIENT_PAYMENT', 'PATIENT_ADVANCE']
 const OUTFLOW_TYPES: TxnType[] = ['COMMISSION_PAYMENT', 'EXPENSE', 'REFUND']
 
 export function listTransactions(db: Database.Database, filters: TransactionFilters = {}): TransactionListResult {
@@ -84,6 +85,7 @@ export function listTransactions(db: Database.Database, filters: TransactionFilt
   const base = `FROM v_transaction_history t
     LEFT JOIN users u ON u.id = t.user_id
     LEFT JOIN bills b ON t.related_ref LIKE 'bill:%' AND CAST(REPLACE(t.related_ref, 'bill:', '') AS INTEGER) = b.id
+    LEFT JOIN patients p ON t.related_ref LIKE 'patient:%' AND CAST(REPLACE(t.related_ref, 'patient:', '') AS INTEGER) = p.id
     LEFT JOIN practitioners pr ON t.related_ref LIKE 'practitioner:%' AND CAST(REPLACE(t.related_ref, 'practitioner:', '') AS INTEGER) = pr.id
     LEFT JOIN expense_categories ec ON t.related_ref LIKE 'expense_category:%' AND CAST(REPLACE(t.related_ref, 'expense_category:', '') AS INTEGER) = ec.id
     ${whereSql}`
@@ -95,7 +97,7 @@ export function listTransactions(db: Database.Database, filters: TransactionFilt
     .prepare(
       `SELECT t.txn_id, t.txn_type, t.amount_paisa, t.txn_at, t.method, t.reference_number,
               t.related_ref, t.notes, u.full_name AS created_by_name,
-              b.bill_number AS bill_number, pr.name AS practitioner_name, ec.name AS category_name
+              b.bill_number AS bill_number, p.full_name AS patient_name, pr.name AS practitioner_name, ec.name AS category_name
        ${base}
        ORDER BY t.txn_at DESC
        LIMIT ? OFFSET ?`
@@ -127,7 +129,7 @@ export function listTransactions(db: Database.Database, filters: TransactionFilt
       reference_number: (r.reference_number as string | null) ?? null,
       related_ref: (r.related_ref as string | null) ?? null,
       related_name:
-        (r.bill_number as string | null) ?? (r.practitioner_name as string | null) ?? (r.category_name as string | null),
+        (r.bill_number as string | null) ?? (r.patient_name as string | null) ?? (r.practitioner_name as string | null) ?? (r.category_name as string | null),
       notes: (r.notes as string | null) ?? null,
       created_by_name: (r.created_by_name as string | null) ?? null
     })),

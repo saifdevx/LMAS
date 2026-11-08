@@ -70,7 +70,7 @@ function rowToBillView(db: Database.Database, row: BillRow): BillView {
     .all(row.id) as BillView['items']
   const payments = db
     .prepare(
-      `SELECT p.id, p.transaction_id, p.amount_paisa, p.method, p.reference_number, p.paid_at, u.full_name AS received_by_name
+      `SELECT p.id, p.transaction_id, p.amount_paisa, p.tendered_paisa, p.change_paisa, p.method, p.reference_number, p.paid_at, u.full_name AS received_by_name
        FROM payments p LEFT JOIN users u ON u.id = p.received_by WHERE p.bill_id = ? ORDER BY p.id`
     )
     .all(row.id) as BillView['payments']
@@ -82,6 +82,7 @@ function rowToBillView(db: Database.Database, row: BillRow): BillView {
     .all(row.id) as BillView['refunds']
   const paid = payments.reduce((s, p) => s + p.amount_paisa, 0)
   const refunded = refunds.reduce((s, r) => s + r.amount_paisa, 0)
+  const patientAdvance = (db.prepare('SELECT COALESCE(SUM(amount_paisa), 0) AS s FROM patient_advances WHERE source_payment_id IN (SELECT id FROM payments WHERE bill_id = ?)').get(row.id) as { s: number }).s
   const cancelled = row.status === 'CANCELLED'
   return {
     id: row.id,
@@ -113,7 +114,8 @@ function rowToBillView(db: Database.Database, row: BillRow): BillView {
     refunds,
     paid_paisa: cancelled ? 0 : paid,
     refunded_paisa: cancelled ? 0 : refunded,
-    outstanding_paisa: cancelled ? 0 : Math.max(0, row.net_paisa - paid + refunded)
+    outstanding_paisa: cancelled ? 0 : Math.max(0, row.net_paisa - paid + refunded),
+    patient_advance_paisa: patientAdvance
   }
 }
 
@@ -135,7 +137,9 @@ export function createBill(db: Database.Database, actor: Actor, input: CreateBil
 
   if (!input.items || input.items.length === 0) throw new BillingError('Add at least one laboratory test to the bill.')
   if (!Number.isInteger(input.discount_paisa) || input.discount_paisa < 0) throw new BillingError('Discount must be a non-negative amount.')
-  if (!Number.isInteger(input.initial_payment_paisa) || input.initial_payment_paisa < 0) throw new BillingError('Amount received must be a non-negative amount.')
+  if (!Number.isInteger(input.initial_payment_paisa) || input.initial_payment_paisa < 0) throw new BillingError('Amount applied to the bill must be a non-negative amount.')
+  const tenderedPaisa = input.initial_tendered_paisa ?? input.initial_payment_paisa
+  if (!Number.isInteger(tenderedPaisa) || tenderedPaisa < 0) throw new BillingError('Amount tendered must be a non-negative amount.')
   const txn = (input.transaction_id ?? '').trim()
   if (txn.length < 8) throw new BillingError('Payment transaction reference is missing or invalid.')
 
@@ -176,8 +180,14 @@ export function createBill(db: Database.Database, actor: Actor, input: CreateBil
   if (totals.discountPaisa > 0 && !actorHas(actor, 'billing.discount')) {
     throw new BillingError('You do not have permission to apply discounts.')
   }
-  if (input.initial_payment_paisa > totals.netPaisa) {
-    throw new BillingError('Amount received cannot exceed the net bill.')
+  const paymentMethod: PaymentMethod = input.method ?? 'CASH'
+  const expectedApplied = Math.min(tenderedPaisa, totals.netPaisa)
+  if (input.initial_payment_paisa !== expectedApplied) {
+    throw new BillingError('Payment amount does not match the tendered amount and bill total. Refresh the bill and try again.')
+  }
+  const excessPaisa = tenderedPaisa - expectedApplied
+  if (excessPaisa > 0 && paymentMethod !== 'CASH' && paymentMethod !== 'BANK_TRANSFER') {
+    throw new BillingError('Overpayment is supported only for cash (change returned) or bank transfer (patient advance).')
   }
 
   // Commission: eligible amount depends on the ACTIVE policy (PRD §3.2).
@@ -241,9 +251,15 @@ export function createBill(db: Database.Database, actor: Actor, input: CreateBil
     }
 
     if (input.initial_payment_paisa > 0) {
-      db.prepare(
-        'INSERT INTO payments (transaction_id, bill_id, amount_paisa, method, reference_number, received_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).run(txn, billId, input.initial_payment_paisa, input.method ?? 'CASH', (input.reference_number ?? '').trim() || null, actor.id, (input.notes ?? '').trim() || null)
+      const paymentInfo = db.prepare(
+        'INSERT INTO payments (transaction_id, bill_id, amount_paisa, method, reference_number, received_by, notes, tendered_paisa, change_paisa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(txn, billId, input.initial_payment_paisa, paymentMethod, (input.reference_number ?? '').trim() || null, actor.id, (input.notes ?? '').trim() || null, tenderedPaisa, paymentMethod === 'CASH' ? excessPaisa : 0)
+      if (paymentMethod === 'BANK_TRANSFER' && excessPaisa > 0) {
+        const paymentId = Number(paymentInfo.lastInsertRowid)
+        db.prepare(`INSERT INTO patient_advances (patient_id, source_payment_id, amount_paisa, remaining_paisa, method, reference_number, created_by, notes)
+          VALUES (?, ?, ?, ?, 'BANK_TRANSFER', ?, ?, ?)`)
+          .run(patient.id, paymentId, excessPaisa, excessPaisa, (input.reference_number ?? '').trim() || null, actor.id, 'Excess bank transfer from bill ' + billNumber)
+      }
     }
 
     writeAudit(db, {
@@ -258,7 +274,10 @@ export function createBill(db: Database.Database, actor: Actor, input: CreateBil
         net_paisa: totals.netPaisa,
         commission_paisa: commission.commissionPaisa,
         basis: policy,
-        received: input.initial_payment_paisa
+        applied: input.initial_payment_paisa,
+        tendered: tenderedPaisa,
+        change_returned: paymentMethod === 'CASH' ? excessPaisa : 0,
+        patient_advance: paymentMethod === 'BANK_TRANSFER' ? excessPaisa : 0
       }
     })
     return billId
@@ -269,7 +288,9 @@ export function createBill(db: Database.Database, actor: Actor, input: CreateBil
 }
 
 export function addPayment(db: Database.Database, actor: Actor, input: AddPaymentInput): BillView {
-  if (!Number.isInteger(input.amount_paisa) || input.amount_paisa <= 0) throw new BillingError('Payment amount must be a positive amount.')
+  if (!Number.isInteger(input.amount_paisa) || input.amount_paisa <= 0) throw new BillingError('Payment amount applied to the bill must be positive.')
+  const tenderedPaisa = input.tendered_paisa ?? input.amount_paisa
+  if (!Number.isInteger(tenderedPaisa) || tenderedPaisa <= 0) throw new BillingError('Amount tendered must be a positive amount.')
   const txn = (input.transaction_id ?? '').trim()
   if (txn.length < 8) throw new BillingError('Payment transaction reference is missing or invalid.')
   const method: PaymentMethod = input.method ?? 'CASH'
@@ -283,15 +304,25 @@ export function addPayment(db: Database.Database, actor: Actor, input: AddPaymen
   const alreadyRefunded = (db.prepare('SELECT COALESCE(SUM(amount_paisa), 0) AS s FROM refunds WHERE bill_id = ?').get(row.id) as { s: number }).s
   const outstanding = row.net_paisa - alreadyPaid + alreadyRefunded
   if (outstanding <= 0) throw new BillingError('This bill is already fully paid.')
-  if (input.amount_paisa > outstanding) {
-    throw new BillingError('Payment exceeds the outstanding balance for this bill.')
+  const expectedApplied = Math.min(tenderedPaisa, outstanding)
+  if (input.amount_paisa !== expectedApplied) {
+    throw new BillingError('Payment amount does not match the tendered amount and outstanding balance.')
+  }
+  const excessPaisa = tenderedPaisa - expectedApplied
+  if (excessPaisa > 0 && method !== 'CASH' && method !== 'BANK_TRANSFER') {
+    throw new BillingError('Overpayment is supported only for cash (change returned) or bank transfer (patient advance).')
   }
 
   const tx = db.transaction(() => {
     try {
-      db.prepare(
-        'INSERT INTO payments (transaction_id, bill_id, amount_paisa, method, reference_number, received_by, notes) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).run(txn, row.id, input.amount_paisa, method, (input.reference_number ?? '').trim() || null, actor.id, (input.notes ?? '').trim() || null)
+      const paymentInfo = db.prepare(
+        'INSERT INTO payments (transaction_id, bill_id, amount_paisa, method, reference_number, received_by, notes, tendered_paisa, change_paisa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(txn, row.id, input.amount_paisa, method, (input.reference_number ?? '').trim() || null, actor.id, (input.notes ?? '').trim() || null, tenderedPaisa, method === 'CASH' ? excessPaisa : 0)
+      if (method === 'BANK_TRANSFER' && excessPaisa > 0) {
+        db.prepare(`INSERT INTO patient_advances (patient_id, source_payment_id, amount_paisa, remaining_paisa, method, reference_number, created_by, notes)
+          VALUES (?, ?, ?, ?, 'BANK_TRANSFER', ?, ?, ?)`)
+          .run(row.patient_id, Number(paymentInfo.lastInsertRowid), excessPaisa, excessPaisa, (input.reference_number ?? '').trim() || null, actor.id, 'Excess bank transfer from bill ' + row.bill_number)
+      }
     } catch (err) {
       if (err instanceof Error && /UNIQUE/.test(err.message)) {
         throw new BillingError('Duplicate payment blocked: this transaction was already recorded.')
@@ -320,7 +351,7 @@ export function addPayment(db: Database.Database, actor: Actor, input: AddPaymen
       action: 'PAYMENT_RECORDED',
       entityType: 'payment',
       entityId: txn,
-      newValue: { bill_id: row.id, bill_number: row.bill_number, amount_paisa: input.amount_paisa, method }
+      newValue: { bill_id: row.id, bill_number: row.bill_number, amount_applied_paisa: input.amount_paisa, tendered_paisa: tenderedPaisa, change_returned_paisa: method === 'CASH' ? excessPaisa : 0, patient_advance_paisa: method === 'BANK_TRANSFER' ? excessPaisa : 0, method }
     })
   })
   tx()

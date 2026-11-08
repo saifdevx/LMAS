@@ -150,3 +150,16 @@ CP5 tests (`tests/cp5.test.ts`): CSP present and strict; renderer sources
 contain no external URLs; change-own-password (current-password check,
 must-change flag cleared, audited, old password rejected afterwards);
 migration drill; performance smoke.
+
+## Excess tender / patient advance verification (Migration 003)
+
+Use dummy patient data only. Run these cases in both New Billing and the existing Bill Detail payment form:
+
+1. **Cash overpayment:** bill PKR 1,000; tender PKR 5,000. Expected: payment applied PKR 1,000, change returned PKR 4,000, bill outstanding PKR 0. The payment row stores `amount_paisa=100000`, `tendered_paisa=500000`, `change_paisa=400000`.
+2. **Bank-transfer overpayment:** bill PKR 1,000; transfer PKR 5,000. Expected: payment applied PKR 1,000, no cash change, patient advance PKR 4,000 in `patient_advances`, with `remaining_paisa=400000`.
+3. **Unsupported method overpayment:** select Card, Mobile Wallet or Cheque and enter PKR 5,000 against a PKR 1,000 bill. Expected: save is blocked.
+4. **Partial payment:** bill PKR 2,000; tender PKR 500. Expected: applied PKR 500, outstanding PKR 1,500.
+5. **Commission basis:** for referred patients using COLLECTED commission, only the amount applied to the bill contributes to commission accrual; change and patient advances must not contribute.
+6. **Transaction history:** patient bill payment and patient advance appear as separate inflow entries. Their sum equals the actual bank/cash received; the advance remains a liability, not bill revenue.
+
+Migration `003_payment_tender_and_advances` is append-only and backfills historical payment tendered amounts to their previously stored applied amounts. It does not alter historical bill totals or existing payments.

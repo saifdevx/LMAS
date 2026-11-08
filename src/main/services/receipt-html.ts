@@ -77,6 +77,9 @@ export function buildReceiptHtml(
   const methodLine = lastPayment
     ? `<div class="meta-row"><span class="k">Payment method</span><span class="v">${escapeHtml(METHOD_LABEL[lastPayment.method] ?? lastPayment.method)}</span></div>`
     : ''
+  const tenderLines = lastPayment && lastPayment.tendered_paisa > lastPayment.amount_paisa
+    ? `<tr><td>Amount tendered</td><td class="r">${money(lastPayment.tendered_paisa)}</td></tr>${lastPayment.change_paisa > 0 ? `<tr><td>Change returned</td><td class="r">${money(lastPayment.change_paisa)}</td></tr>` : `<tr><td>Patient advance</td><td class="r">${money(lastPayment.tendered_paisa - lastPayment.amount_paisa)}</td></tr>`}`
+    : ''
 
   const sheetStyle =
     layout === 'thermal'
@@ -150,7 +153,8 @@ export function buildReceiptHtml(
     <tr><td>Subtotal</td><td class="r">${money(bill.subtotal_paisa)}</td></tr>
     ${bill.discount_paisa > 0 ? `<tr><td>Discount</td><td class="r">-${money(bill.discount_paisa)}</td></tr>` : ''}
     <tr class="grand"><td>Total</td><td class="r">${money(bill.net_paisa)}</td></tr>
-    <tr><td>Amount received</td><td class="r">${money(bill.paid_paisa)}</td></tr>
+    <tr><td>Amount applied to bill</td><td class="r">${money(bill.paid_paisa)}</td></tr>
+    ${tenderLines}
     <tr><td><strong>Balance due</strong></td><td class="r"><strong>${money(bill.outstanding_paisa)}</strong></td></tr>
   </table>
 

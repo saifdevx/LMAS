@@ -19,6 +19,7 @@ interface TxPageProps {
 function typeTone(t: string): BadgeTone {
   switch (t) {
     case 'PATIENT_PAYMENT':
+    case 'PATIENT_ADVANCE':
       return 'success'
     case 'COMMISSION_PAYMENT':
     case 'EXPENSE':
@@ -75,7 +76,8 @@ export function TransactionHistoryPage({ session }: TxPageProps) {
           <Label>Type</Label>
           <Select value={type} onChange={(e) => { setType(e.target.value); setPage(1) }}>
             <option value="ALL">All types</option>
-            <option value="PATIENT_PAYMENT">Patient payments</option>
+            <option value="PATIENT_PAYMENT">Patient bill payments</option>
+            <option value="PATIENT_ADVANCE">Patient advances</option>
             <option value="COMMISSION_PAYMENT">Commission payments</option>
             <option value="EXPENSE">Expenses</option>
             <option value="REFUND">Refunds</option>

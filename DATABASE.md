@@ -137,3 +137,9 @@ Key attributes (PK unless noted):
 Settings (`numbering.billPrefix`, `numbering.patientPrefix`,
 `numbering.reportPrefix`). Codes are generated in the main process inside the
 same transaction as the financial write.
+
+### Payment tender and patient advances (Migration 003)
+
+`payments.amount_paisa` remains the amount actually applied to the bill. `payments.tendered_paisa` stores the full cash/bank amount received, and `payments.change_paisa` stores physical cash change returned. Existing payment rows are backfilled with `tendered_paisa = amount_paisa` and zero change.
+
+Excess bank transfers are stored in `patient_advances`, linked to the originating payment and patient. `amount_paisa` is the original credit and `remaining_paisa` is the unapplied balance. The transaction history view exposes these as separate `PATIENT_ADVANCE` inflows. This release records advances but does not yet provide a workflow to apply an existing advance to a later bill.

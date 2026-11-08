@@ -162,6 +162,7 @@ export const billCreateSchema = z.object({
     items: z.array(z.object({ test_id: z.number().int().positive() })).min(1, 'Add at least one test').max(100),
     discount_paisa: z.number().int().min(0),
     initial_payment_paisa: z.number().int().min(0),
+    initial_tendered_paisa: z.number().int().min(0).optional(),
     method: paymentMethodSchema.optional(),
     reference_number: optionalText(80),
     transaction_id: z.string().trim().min(8, 'Transaction reference missing').max(64),
@@ -174,6 +175,7 @@ export const addPaymentSchema = z.object({
   input: z.object({
     bill_id: z.number().int().positive(),
     amount_paisa: z.number().int().positive('Payment must be greater than zero'),
+    tendered_paisa: z.number().int().positive().optional(),
     method: paymentMethodSchema,
     reference_number: optionalText(80),
     transaction_id: z.string().trim().min(8).max(64),

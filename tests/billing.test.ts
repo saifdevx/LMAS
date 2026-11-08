@@ -251,6 +251,95 @@ describe('PRD Scenario 5 — partial patient payments', () => {
   })
 })
 
+
+describe('Excess tender handling', () => {
+  it('returns cash change without counting it as bill payment', () => {
+    const bill = createBill(db, admin, {
+      patient_id: selfPatient.id,
+      category: 'SELF',
+      items: [{ test_id: sugar.id }],
+      discount_paisa: 0,
+      initial_payment_paisa: 30000,
+      initial_tendered_paisa: 500000,
+      method: 'CASH',
+      transaction_id: 'TXN-CASH-CHANGE-01'
+    })
+    expect(bill.net_paisa).toBe(30000)
+    expect(bill.paid_paisa).toBe(30000)
+    expect(bill.outstanding_paisa).toBe(0)
+    expect(bill.patient_advance_paisa).toBe(0)
+    expect(bill.payments[0].tendered_paisa).toBe(500000)
+    expect(bill.payments[0].change_paisa).toBe(470000)
+  })
+
+  it('records excess bank transfer as patient advance, not bill payment', () => {
+    const bill = createBill(db, admin, {
+      patient_id: selfPatient.id,
+      category: 'SELF',
+      items: [{ test_id: sugar.id }],
+      discount_paisa: 0,
+      initial_payment_paisa: 30000,
+      initial_tendered_paisa: 500000,
+      method: 'BANK_TRANSFER',
+      reference_number: 'BANK-REF-ADV-01',
+      transaction_id: 'TXN-BANK-ADVANCE-01'
+    })
+    expect(bill.paid_paisa).toBe(30000)
+    expect(bill.outstanding_paisa).toBe(0)
+    expect(bill.patient_advance_paisa).toBe(470000)
+    expect(bill.payments[0].change_paisa).toBe(0)
+    const advance = db.prepare('SELECT patient_id, amount_paisa, remaining_paisa, method FROM patient_advances WHERE source_payment_id = ?').get(bill.payments[0].id) as { patient_id: number; amount_paisa: number; remaining_paisa: number; method: string }
+    expect(advance.patient_id).toBe(selfPatient.id)
+    expect(advance.amount_paisa).toBe(470000)
+    expect(advance.remaining_paisa).toBe(470000)
+    expect(advance.method).toBe('BANK_TRANSFER')
+    const advanceId = (db.prepare('SELECT id FROM patient_advances WHERE source_payment_id = ?').get(bill.payments[0].id) as { id: number }).id
+    const ledgerRow = db.prepare("SELECT txn_type, amount_paisa FROM v_transaction_history WHERE txn_id = ?").get('ADV-' + advanceId) as { txn_type: string; amount_paisa: number }
+    expect(ledgerRow.txn_type).toBe('PATIENT_ADVANCE')
+    expect(ledgerRow.amount_paisa).toBe(470000)
+  })
+
+  it('supports excess cash tender when collecting a later partial payment', () => {
+    const bill = createBill(db, admin, {
+      patient_id: selfPatient.id, category: 'SELF', items: [{ test_id: lipid.id }],
+      discount_paisa: 0, initial_payment_paisa: 0, transaction_id: 'TXN-LATER-CASH-BASE'
+    })
+    const updated = addPayment(db, admin, {
+      bill_id: bill.id, amount_paisa: 120000, tendered_paisa: 200000,
+      method: 'CASH', transaction_id: 'TXN-LATER-CASH-OVER'
+    })
+    expect(updated.paid_paisa).toBe(120000)
+    expect(updated.outstanding_paisa).toBe(0)
+    expect(updated.payments[0].change_paisa).toBe(80000)
+  })
+
+  it('supports excess bank transfer when collecting a later partial payment', () => {
+    const bill = createBill(db, admin, {
+      patient_id: selfPatient.id, category: 'SELF', items: [{ test_id: lipid.id }],
+      discount_paisa: 0, initial_payment_paisa: 0, transaction_id: 'TXN-LATER-BANK-BASE'
+    })
+    const updated = addPayment(db, admin, {
+      bill_id: bill.id, amount_paisa: 120000, tendered_paisa: 200000,
+      method: 'BANK_TRANSFER', transaction_id: 'TXN-LATER-BANK-OVER'
+    })
+    expect(updated.paid_paisa).toBe(120000)
+    expect(updated.patient_advance_paisa).toBe(80000)
+  })
+
+  it('rejects excess card payment instead of silently treating it as cash change', () => {
+    expect(() => createBill(db, admin, {
+      patient_id: selfPatient.id,
+      category: 'SELF',
+      items: [{ test_id: sugar.id }],
+      discount_paisa: 0,
+      initial_payment_paisa: 30000,
+      initial_tendered_paisa: 500000,
+      method: 'CARD',
+      transaction_id: 'TXN-CARD-OVERPAY-01'
+    })).toThrow(/only for cash|bank transfer/i)
+  })
+})
+
 describe('PRD Scenario 8 — duplicate payment protection', () => {
   it('blocks the same transaction ID twice and keeps the balance correct', () => {
     const bill = createBill(db, admin, {

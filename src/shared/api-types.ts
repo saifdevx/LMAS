@@ -268,6 +268,8 @@ export interface BillPaymentView {
   id: number
   transaction_id: string
   amount_paisa: number
+  tendered_paisa: number
+  change_paisa: number
   method: PaymentMethod
   reference_number: string | null
   paid_at: string
@@ -305,6 +307,7 @@ export interface BillView {
   paid_paisa: number
   refunded_paisa: number
   outstanding_paisa: number
+  patient_advance_paisa: number
 }
 
 export interface CreateBillInput {
@@ -313,7 +316,10 @@ export interface CreateBillInput {
   practitioner_id?: number | null
   items: Array<{ test_id: number }>
   discount_paisa: number
+  /** Amount applied to the bill (not the physical tender). */
   initial_payment_paisa: number
+  /** Total amount handed over/transferred by the patient. */
+  initial_tendered_paisa?: number
   method?: PaymentMethod
   reference_number?: string
   /** Client-generated unique key; duplicate submission is rejected (PRD Scenario 8). */
@@ -323,7 +329,10 @@ export interface CreateBillInput {
 
 export interface AddPaymentInput {
   bill_id: number
+  /** Amount applied to the outstanding bill balance. */
   amount_paisa: number
+  /** Total cash tendered or bank transfer amount. */
+  tendered_paisa?: number
   method: PaymentMethod
   reference_number?: string
   transaction_id: string

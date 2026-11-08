@@ -89,19 +89,26 @@ export function BillingPage({ session, initialPatientId }: BillingPageProps) {
     try {
       const totals = calculateBillTotals(lines.map((l) => ({ lineTotalPaisa: l.price_paisa })), discount.trim() === '' ? 0 : toPaisa(discount))
       const commission = calculateCommission({ category, eligibleAmountPaisa: totals.netPaisa, rateBp })
-      const receivedPaisa = received.trim() === '' ? 0 : toPaisa(received)
+      const tenderedPaisa = received.trim() === '' ? 0 : toPaisa(received)
+      const appliedPaisa = Math.min(tenderedPaisa, totals.netPaisa)
+      const excessPaisa = Math.max(0, tenderedPaisa - appliedPaisa)
+      const overpaymentSupported = method === 'CASH' || method === 'BANK_TRANSFER'
       return {
         ok: true,
         totals,
         commission,
-        receivedPaisa,
-        outstanding: totals.netPaisa - receivedPaisa,
-        problem: receivedPaisa > totals.netPaisa ? 'Amount received cannot exceed the net bill.' : null
+        receivedPaisa: tenderedPaisa,
+        appliedPaisa,
+        excessPaisa,
+        changePaisa: method === 'CASH' ? excessPaisa : 0,
+        advancePaisa: method === 'BANK_TRANSFER' ? excessPaisa : 0,
+        outstanding: totals.netPaisa - appliedPaisa,
+        problem: excessPaisa > 0 && !overpaymentSupported ? 'Overpayment is supported only for cash (change returned) or bank transfer (patient advance).' : null
       }
     } catch (err) {
       return { ok: false, problem: err instanceof Error ? err.message : 'Check the amounts.' }
     }
-  }, [lines, discount, category, rateBp, received])
+  }, [lines, discount, category, rateBp, received, method])
 
   const canSave =
     patient !== null &&
@@ -138,7 +145,8 @@ export function BillingPage({ session, initialPatientId }: BillingPageProps) {
         practitioner_id: category === 'REFERRED' ? practitionerId : null,
         items: lines.map((l) => ({ test_id: l.id })),
         discount_paisa: discount.trim() === '' ? 0 : toPaisa(discount),
-        initial_payment_paisa: received.trim() === '' ? 0 : toPaisa(received),
+        initial_payment_paisa: preview.appliedPaisa!,
+        initial_tendered_paisa: received.trim() === '' ? 0 : toPaisa(received),
         method,
         reference_number: reference,
         transaction_id: crypto.randomUUID(),
@@ -194,9 +202,12 @@ export function BillingPage({ session, initialPatientId }: BillingPageProps) {
           </div>
           <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
             <div className="flex justify-between"><span className="text-slate-500">Net bill</span><span className="font-medium">{formatPKR(savedBill.net_paisa)}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">Received</span><span className="font-medium text-emerald-700">{formatPKR(savedBill.paid_paisa)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Tendered</span><span className="font-medium">{formatPKR(savedBill.payments.reduce((sum, p) => sum + p.tendered_paisa, 0))}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Applied to bill</span><span className="font-medium text-emerald-700">{formatPKR(savedBill.paid_paisa)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Balance</span><span className="font-medium text-red-700">{formatPKR(savedBill.outstanding_paisa)}</span></div>
           </div>
+          {savedBill.payments.some((p) => p.change_paisa > 0) && <p className="mt-2 text-sm text-amber-700">Change returned: {formatPKR(savedBill.payments.reduce((sum, p) => sum + p.change_paisa, 0))}</p>}
+          {savedBill.patient_advance_paisa > 0 && <p className="mt-2 text-sm text-sky-700">Patient bank-transfer advance recorded: {formatPKR(savedBill.patient_advance_paisa)}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => void printSaved('thermal')}><Printer className="h-3.5 w-3.5" /> Print thermal receipt</Button>
             <Button variant="outline" size="sm" onClick={() => void printSaved('a4')}><Printer className="h-3.5 w-3.5" /> Print A4</Button>
@@ -428,7 +439,10 @@ export function BillingPage({ session, initialPatientId }: BillingPageProps) {
               ) : (
                 <div className="flex justify-between"><span className="text-slate-500">Commission</span><span>{formatPKR(0)}</span></div>
               )}
-              <div className="flex justify-between"><span className="text-slate-500">Received now</span><span className="text-emerald-700">{formatPKR(preview.receivedPaisa!)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Amount tendered / transferred</span><span>{formatPKR(preview.receivedPaisa!)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Amount applied to bill</span><span className="text-emerald-700">{formatPKR(preview.appliedPaisa!)}</span></div>
+              {preview.changePaisa! > 0 && <div className="flex justify-between font-semibold text-amber-700"><span>Change to return</span><span>{formatPKR(preview.changePaisa!)}</span></div>}
+              {preview.advancePaisa! > 0 && <div className="flex justify-between font-semibold text-sky-700"><span>Patient advance / credit</span><span>{formatPKR(preview.advancePaisa!)}</span></div>}
               <div className="flex justify-between font-semibold"><span>Balance due after this payment</span><span className={preview.outstanding! > 0 ? 'text-red-700' : 'text-emerald-700'}>{formatPKR(Math.max(0, preview.outstanding!))}</span></div>
             </div>
           ) : (

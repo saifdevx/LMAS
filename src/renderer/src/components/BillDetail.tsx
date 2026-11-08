@@ -51,6 +51,11 @@ export function BillDetail({ session, billId, onClose, onChanged }: BillDetailPr
   const canPay = session.user.permissions.includes('billing.manage')
   const canCancel = session.user.permissions.includes('bills.cancel')
   const canRefund = session.user.permissions.includes('refunds.issue')
+  const rawPayTendered = payAmount.trim() === '' ? 0 : Number(payAmount)
+  const payTenderedPaisa = Number.isFinite(rawPayTendered) && rawPayTendered > 0 ? Math.round(rawPayTendered * 100) : 0
+  const payAppliedPaisa = bill ? Math.min(payTenderedPaisa, bill.outstanding_paisa) : 0
+  const payExcessPaisa = Math.max(0, payTenderedPaisa - payAppliedPaisa)
+  const payOverpaymentUnsupported = payExcessPaisa > 0 && payMethod !== 'CASH' && payMethod !== 'BANK_TRANSFER'
 
   async function addPayment() {
     if (!bill) return
@@ -59,7 +64,8 @@ export function BillDetail({ session, billId, onClose, onChanged }: BillDetailPr
     try {
       const updated = await api.billsAddPayment(session.token, {
         bill_id: bill.id,
-        amount_paisa: Math.round(Number(payAmount) * 100),
+        amount_paisa: payAppliedPaisa,
+        tendered_paisa: payTenderedPaisa,
         method: payMethod,
         reference_number: payRef,
         transaction_id: crypto.randomUUID()
@@ -215,7 +221,8 @@ export function BillDetail({ session, billId, onClose, onChanged }: BillDetailPr
             )}
           </div>
           <div className="space-y-1 text-sm">
-            <div className="flex justify-between"><span className="text-slate-500">Received</span><span className="text-emerald-700">{formatPKR(bill.paid_paisa)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Applied to bill</span><span className="text-emerald-700">{formatPKR(bill.paid_paisa)}</span></div>
+            {bill.patient_advance_paisa > 0 && <div className="flex justify-between"><span className="text-slate-500">Patient advance recorded</span><span className="text-sky-700">{formatPKR(bill.patient_advance_paisa)}</span></div>}
             {bill.refunded_paisa > 0 && (
               <div className="flex justify-between"><span className="text-slate-500">Refunded</span><span className="text-red-700">-{formatPKR(bill.refunded_paisa)}</span></div>
             )}
@@ -234,19 +241,23 @@ export function BillDetail({ session, billId, onClose, onChanged }: BillDetailPr
                 <TH>Transaction</TH>
                 <TH>Method</TH>
                 <TH>Reference</TH>
-                <TH className="text-right">Amount</TH>
+                <TH className="text-right">Applied</TH>
+                <TH className="text-right">Tendered</TH>
+                <TH className="text-right">Change / advance</TH>
                 <TH>When</TH>
                 <TH>By</TH>
               </tr>
             </THead>
             <tbody>
-              {bill.payments.length === 0 && <EmptyRow colSpan={6}>No payments recorded.</EmptyRow>}
+              {bill.payments.length === 0 && <EmptyRow colSpan={8}>No payments recorded.</EmptyRow>}
               {bill.payments.map((p) => (
                 <TR key={p.id}>
                   <TD className="font-mono text-xs">{p.transaction_id.slice(0, 13)}…</TD>
                   <TD>{methodLabel(p.method)}</TD>
                   <TD>{p.reference_number ?? '—'}</TD>
                   <TD className="text-right font-medium">{formatPKR(p.amount_paisa)}</TD>
+                  <TD className="text-right">{formatPKR(p.tendered_paisa)}</TD>
+                  <TD className="text-right">{formatPKR(p.change_paisa > 0 ? p.change_paisa : Math.max(0, p.tendered_paisa - p.amount_paisa))}</TD>
                   <TD>{p.paid_at}</TD>
                   <TD>{p.received_by_name ?? '—'}</TD>
                 </TR>
@@ -260,7 +271,7 @@ export function BillDetail({ session, billId, onClose, onChanged }: BillDetailPr
             <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Record a payment (outstanding {formatPKR(bill.outstanding_paisa)})</h4>
             <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
               <div>
-                <Label>Amount (PKR) *</Label>
+                <Label>Amount tendered / transferred (PKR) *</Label>
                 <Input
                   type="number"
                   min={0}
@@ -284,10 +295,16 @@ export function BillDetail({ session, billId, onClose, onChanged }: BillDetailPr
                 <Label>Reference</Label>
                 <Input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="optional" />
               </div>
-              <Button disabled={payBusy || !payAmount} onClick={() => void addPayment()}>
+              <Button disabled={payBusy || !payAmount || payTenderedPaisa <= 0 || payAppliedPaisa <= 0 || payOverpaymentUnsupported} onClick={() => void addPayment()}>
                 {payBusy && <Loader2 className="h-4 w-4 animate-spin" />} Record payment
               </Button>
             </div>
+            {payAmount && bill && <div className="mt-2 space-y-1 text-xs text-slate-600">
+              <div className="flex justify-between"><span>Applied to bill</span><span>{formatPKR(payAppliedPaisa)}</span></div>
+              {payExcessPaisa > 0 && payMethod === 'CASH' && <div className="flex justify-between font-medium text-amber-700"><span>Change to return</span><span>{formatPKR(payExcessPaisa)}</span></div>}
+              {payExcessPaisa > 0 && payMethod === 'BANK_TRANSFER' && <div className="flex justify-between font-medium text-sky-700"><span>Patient advance / credit</span><span>{formatPKR(payExcessPaisa)}</span></div>}
+              {payOverpaymentUnsupported && <p className="text-red-700">Overpayment is supported only for cash or bank transfer.</p>}
+            </div>}
             <Alert kind="error" message={payError} />
           </div>
         )}
