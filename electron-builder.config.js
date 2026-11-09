@@ -15,6 +15,12 @@ module.exports = {
     output: 'dist'
   },
   files: ['out/**/*'],
+  // Native module (better-sqlite3) must be compiled for ELECTRON, never for the
+  // Node.js that runs npm. Rebuild explicitly and keep the .node file outside the asar.
+  npmRebuild: true,
+  nodeGypRebuild: false,
+  buildDependenciesFromSource: false,
+  asarUnpack: ['**/node_modules/better-sqlite3/**/*.node'],
   // Asar + integrity-resource embedding requires Wine when cross-building on
   // Linux; the official Windows build keeps asar enabled with integrity.
   asar: process.platform === 'win32',

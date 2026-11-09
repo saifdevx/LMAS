@@ -14,8 +14,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "electron . --smoke",
-    "rebuild:deps": "electron-builder install-app-deps",
-    "dist:win": "electron-vite build && electron-builder --win nsis --x64 --config electron-builder.config.js"
+    "rebuild:deps": "node scripts/rebuild-electron.cjs",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "verify:native": "node scripts/verify-native.cjs",
+    "dist:win": "node scripts/rebuild-electron.cjs && electron-vite build && electron-builder --win nsis --x64 --config electron-builder.config.js && node scripts/verify-native.cjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",

@@ -136,8 +136,8 @@ describe('CP5: database migration drill — version 1 data survives migration 00
     const reopened = openDatabase(drill)
     const { from, to } = runMigrations(reopened)
     expect(from).toBe(1)
-    expect(to).toBe(2)
-    expect(currentVersion(reopened)).toBe(2)
+    expect(to).toBe(MIGRATIONS[MIGRATIONS.length - 1].version)
+    expect(currentVersion(reopened)).toBe(MIGRATIONS[MIGRATIONS.length - 1].version)
 
     // Business data fully preserved.
     const stillThere = reopened
